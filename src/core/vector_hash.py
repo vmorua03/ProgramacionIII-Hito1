@@ -1,8 +1,39 @@
 """[HITO 1] Tabla Hash con resolución de colisiones por encadenamiento (Separate Chaining).
 
-TODO [Hito 1 - Informe Big-O]:
-Documenta en este docstring la complejidad temporal y espacial de `_hash`, `put`,
-`search` y `delete` en función del factor de carga alpha = n / m.
+Sea n el número de registros, m el número de buckets y alpha = n / m
+el factor de carga. Sea L la longitud de la clave consultada. Para
+analizar los recorridos de las cadenas, se supone que las claves
+tienen longitud acotada y que compararlas cuesta O(1).
+
+_hash
+    Recorre los L caracteres de la clave para calcular el índice
+    del bucket. Tarda O(L) en promedio y en el peor caso. El cálculo
+    usa O(1) de espacio auxiliar, pero la validación con strip()
+    puede crear una cadena temporal de hasta O(L).
+
+put
+    Calcula el índice y recorre la cadena para comprobar si el ID
+    ya existe. Actualizar el valor o enlazar un nodo nuevo al inicio
+    cuesta O(1) una vez terminada esa búsqueda.
+
+search
+    Calcula el índice y recorre la cadena hasta encontrar el ID
+    o llegar al final. Devuelve la referencia al vector encontrado.
+
+delete
+    Calcula el índice y recorre la cadena guardando el nodo anterior.
+    Una vez encontrado el ID, desvincula el nodo en O(1).
+
+Con buena dispersión y claves de longitud acotada, put, search y
+delete tardan O(1 + alpha) en promedio. Si alpha se mantiene acotado,
+ese costo es O(1). En el peor caso, todos los registros caen en el
+mismo bucket y cualquiera de las tres operaciones tarda O(n).
+
+Los recorridos de put, search y delete usan O(1) de espacio auxiliar
+en promedio y en el peor caso. Si se considera el costo de validar
+claves de longitud variable, las tres operaciones pueden usar hasta
+O(L) de espacio temporal al llamar a _hash. El almacenamiento total
+de la tabla es O(m + n) por el arreglo de buckets y los nodos.
 """
 
 from __future__ import annotations
@@ -15,7 +46,7 @@ from config.settings import DEFAULT_HASH_CAPACITY, FeatureVector
 
 @dataclass
 class HashNode:
-    """Nodo de lista simplemente enlazada para un bucket de la Tabla Hash."""
+    """Nodo de la lista enlazada de un bucket."""
 
     key: str
     value: FeatureVector
@@ -23,74 +54,82 @@ class HashNode:
 
 
 class FeatureHashTable:
-    """Tabla Hash con encadenamiento separado para indexar objetos `FeatureVector` por ID.
-
-    IMPORTANTE: Prohibido delegar el almacenamiento a un `dict` nativo de Python.
-    Debe manipularse la lista `self.buckets` y los nodos enlazados `HashNode`.
-    """
+    """Indexa vectores por feature_id mediante listas enlazadas."""
 
     def __init__(self, capacity: int = DEFAULT_HASH_CAPACITY) -> None:
-        """Inicializa la tabla hash con un número fijo de buckets.
-
-        Raises:
-            ValueError: Si `capacity <= 0` o no es un entero válido.
-        """
         if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity <= 0:
             raise ValueError("La capacidad de la tabla hash debe ser un entero positivo.")
-        self.capacity: int = capacity
-        self.buckets: list[Optional[HashNode]] = [None] * self.capacity
-        self._size: int = 0
+
+        self.capacity = capacity
+        self.buckets: list[Optional[HashNode]] = [None] * capacity
+        self._size = 0
 
     def __len__(self) -> int:
-        """Devuelve la cantidad de registros únicos almacenados."""
         return self._size
 
     def _hash(self, key: str) -> int:
-        """Calcula el índice del bucket en `[0, self.capacity - 1]` para la clave `key`.
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("La clave debe ser una cadena con al menos un carácter no blanco.")
 
-        Requisitos de evaluación:
-        - Validar que `key` sea un `str` no vacío (`ValueError` si está vacío o solo espacios).
-        - Implementar una función de dispersión determinista módulo `self.capacity`.
-        """
-        raise NotImplementedError("TODO [Hito 1]: Implementar FeatureHashTable._hash()")
+        index = 0
+        for character in key:
+            index = (index * 31 + ord(character)) % self.capacity
+        return index
 
     def put(self, record: FeatureVector) -> None:
-        """Inserta o actualiza un `FeatureVector` en la tabla hash en O(1) promedio.
+        if not isinstance(record, FeatureVector):
+            raise TypeError("El registro debe ser un FeatureVector.")
 
-        Requisitos de evaluación (Casos Borde):
-        - Validar que `record` sea instancia de `FeatureVector`.
-        - Si `record.feature_id` ya existe en la lista enlazada del bucket, actualizar
-          `current.value = record` sin incrementar `_size`.
-        - Si hay colisión con otra clave distinta, enlazar un nuevo `HashNode` en el bucket.
-        """
-        raise NotImplementedError("TODO [Hito 1]: Implementar FeatureHashTable.put()")
+        key = record.feature_id
+        index = self._hash(key)
+        current = self.buckets[index]
+
+        while current is not None:
+            if current.key == key:
+                current.value = record
+                return
+            current = current.next
+
+        self.buckets[index] = HashNode(key, record, self.buckets[index])
+        self._size += 1
 
     def search(self, feature_id: str) -> Optional[FeatureVector]:
-        """Recupera un `FeatureVector` por su identificador en O(1) promedio.
+        index = self._hash(feature_id)
+        current = self.buckets[index]
 
-        Returns:
-            La instancia `FeatureVector` si se encuentra en la cadena del bucket, o `None`.
-        """
-        raise NotImplementedError("TODO [Hito 1]: Implementar FeatureHashTable.search()")
+        while current is not None:
+            if current.key == feature_id:
+                return current.value
+            current = current.next
+
+        return None
 
     def delete(self, feature_id: str) -> bool:
-        """Elimina un registro de la lista enlazada del bucket correspondiente.
+        index = self._hash(feature_id)
+        previous = None
+        current = self.buckets[index]
 
-        Returns:
-            `True` si el nodo fue encontrado y desvinculado; `False` si no existía.
-        """
-        raise NotImplementedError("TODO [Hito 1]: Implementar FeatureHashTable.delete()")
+        while current is not None:
+            if current.key == feature_id:
+                if previous is None:
+                    self.buckets[index] = current.next
+                else:
+                    previous.next = current.next
+
+                self._size -= 1
+                return True
+
+            previous = current
+            current = current.next
+
+        return False
 
     def load_factor(self) -> float:
-        """Calcula el factor de carga actual `alpha = n / capacity`."""
         return self._size / self.capacity
 
     def clear(self) -> None:
-        """Reinicia todos los buckets de la tabla hash."""
         self.buckets = [None] * self.capacity
         self._size = 0
 
 
-# Alias de compatibilidad requerido por el enunciado
 CustomHashTable = FeatureHashTable
-
